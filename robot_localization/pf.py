@@ -8,7 +8,7 @@ from rclpy.time import Time
 from rclpy.node import Node
 from std_msgs.msg import Header
 from sensor_msgs.msg import LaserScan
-from nav2_msgs.msg import ParticleCloud, Particle
+from nav2_msgs.msg import ParticleCloud
 from nav2_msgs.msg import Particle as Nav2Particle
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
 from rclpy.duration import Duration
@@ -20,6 +20,7 @@ from helper_functions import TFHelper
 from rclpy.qos import qos_profile_sensor_data
 from angle_helpers import quaternion_from_euler
 
+from typing import List
 
 class Particle(object):
     """Represents a hypothesis (particle) of the robot's pose consisting of x,y and theta (yaw)
@@ -90,6 +91,8 @@ class ParticleFilter(Node):
         )  # the amount of angular movement before performing an update
 
         # TODO: define additional constants if needed
+        self.odom_noise = 0.1 # arbitrary value, could experimentally determine
+        self.robot_pose = Pose()
 
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
         self.create_subscription(
@@ -111,7 +114,7 @@ class ParticleFilter(Node):
         # this is the current scan that our run_loop should process
         self.scan_to_process = None
         # your particle cloud will go here
-        self.particle_cloud = []
+        self.particle_cloud: List[Particle] = []
 
         self.current_odom_xy_theta = []
         self.occupancy_field = OccupancyField(self)
@@ -208,9 +211,16 @@ class ParticleFilter(Node):
         # first make sure that the particle weights are normalized
         self.normalize_particles()
 
-        # TODO: assign the latest pose into self.robot_pose as a geometry_msgs.Pose object
-        # just to get started we will fix the robot's pose to always be at the origin
-        self.robot_pose = Pose()
+        # choose favorite particle
+        max_weight = 0.0
+        particle_choice = Particle()
+        for p in self.particle_cloud:
+            if p.w > max_weight:
+                max_weight = p.w
+                particle_choice = p
+
+        # assert this particle as estimate
+        self.robot_pose = particle_choice.as_pose()
         if hasattr(self, "odom_pose"):
             self.transform_helper.fix_map_to_odom_transform(
                 self.robot_pose, self.odom_pose
@@ -243,14 +253,11 @@ class ParticleFilter(Node):
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        # TODO: modify particles using delta
-
-        # given particle odom pose
-        # add the delta to transform it
-        # auto transform in particle pose
-        # add noise to it by random()*noise (0.1)
-        # in a big for loop for each 300 particles
-        # data addition delta + current odom?? how to add?
+        # modify particles using delta
+        for p in self.particle_cloud:
+            p.x += delta[0] + np.random.randn() * self.odom_noise
+            p.y += delta[1] + np.random.randn() * self.odom_noise
+            p.theta += delta[2] + np.random.randn() * self.odom_noise # maybe different number for theta?
 
     def resample_particles(self):
         """Resample the particles according to the new particle weights.
@@ -260,14 +267,18 @@ class ParticleFilter(Node):
         """
         # make sure the distribution is normalized
         self.normalize_particles()
-        # TODO: fill out the rest of the implementation
 
-        # use helper function draw_random_sample(choices, probabilities, n) in helper_functions.py
-        # outputs the samples[] of particles
-        # inputs:
-        # choices - list? of all the particles
-        # prob - weights of all the particles
-        # n - 300
+        # build ordered list of particle weights
+        weights = []
+        for p in self.particle_cloud:
+            weights.append(p.w)
+
+        # draw new sample and refill particle cloud
+        self.particle_cloud = self.transform_helper.draw_random_sample(self.particle_cloud, weights, self.n_particles)
+
+        # reset weights to low non-zero (rewritten during scan update)
+        for p in self.particle_cloud:
+            p.w = 0.1
 
     def update_particles_with_laser(self, r, theta):
         """Updates the particle weights in response to the scan data
