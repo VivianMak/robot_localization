@@ -8,7 +8,7 @@ from rclpy.time import Time
 from rclpy.node import Node
 from std_msgs.msg import Header
 from sensor_msgs.msg import LaserScan
-from nav2_msgs.msg import ParticleCloud, Particle
+from nav2_msgs.msg import ParticleCloud
 from nav2_msgs.msg import Particle as Nav2Particle
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
 from rclpy.duration import Duration
@@ -19,6 +19,7 @@ from occupancy_field import OccupancyField
 from helper_functions import TFHelper
 from rclpy.qos import qos_profile_sensor_data
 from angle_helpers import quaternion_from_euler
+from typing import List
 
 
 class Particle(object):
@@ -111,7 +112,7 @@ class ParticleFilter(Node):
         # this is the current scan that our run_loop should process
         self.scan_to_process = None
         # your particle cloud will go here
-        self.particle_cloud = []
+        self.particle_cloud: List[Particle] = []
 
         self.current_odom_xy_theta = []
         self.occupancy_field = OccupancyField(self)
@@ -271,19 +272,50 @@ class ParticleFilter(Node):
 
     def update_particles_with_laser(self, r, theta):
         """Updates the particle weights in response to the scan data
-        r: the distance readings to obstacles
-        theta: the angle relative to the robot frame for each corresponding reading
+        r (list): the distance readings to obstacles
+        theta (list): the angle relative to the robot frame for each corresponding reading
         """
         # TODO: implement this
-        pass
 
-    # all for each particle, goal is to find error and update the weight
-    # set a tolerance in r[] to say a scan subset is a landmark/obstacle
-    # adjust the particle scan with theta to match the bag scan
-    # use get_closest_obstacle_distace() to map particle scan obstacle points with bag file obstacle scan
-    # compute the error
-    # use math to redefine weight on error
-    # no return, self.weight updates for each particle!
+        # all for each particle, goal is to find error and update the weight
+        # set a tolerance in r[] to say a scan subseith theta t is a landmark/obstacle
+        # adjust the particle scan with theta to match the bag scan
+        # use get_closest_obstacle_distace() in occupancy.py to map particle scan obstacle points with bag file obstacle scan
+        # compute the error
+        # use math to redefine weight on error
+        # no return, self.weight updates for each particle!
+
+        # Updated psuedocode
+        # Given the current Neato scan of ranges and corresponding theta
+        # Convert the r,theta to x,y coordinates
+        # Project that onto the particles' frame??????????
+        # Each particle is acting as the current Neato position
+        # each with the current Neato scan
+        # Use get_closest_obstacle_distance for each x,y in the Neato scan projection
+        # if returned distance is 0, then the weight is 1 (meaning same position)
+        # do it for all the x,y positions list
+        # Compute the error between the projected x,y and func output distance
+        # Compute the new weights based on error
+
+        x_coord = [r[i] * math.cos(theta[i]) for i in range(len(r))]
+        y_coord = [r[i] * math.sin(theta[i]) for i in range(len(r))]
+
+        for p in self.particle_cloud:
+            for x, y in zip(x_coord, y_coord):
+
+                # Transform Coordinates
+                x += p.x
+                y += p.y
+                # theta +=
+
+                p_error = []
+                error = OccupancyField.get_closest_obstacle_distance(x, y)
+                p_error.append(error)
+
+            value = sum(p_error) / len(p_error)
+
+            # Use error to reassign weights to particle
+            p.w *= 1 / value
 
     def update_initial_pose(self, msg):
         """Callback function to handle re-initializing the particle filter based on a pose estimate.
@@ -311,11 +343,18 @@ class ParticleFilter(Node):
     def normalize_particles(self):
         """Make sure the particle weights define a valid distribution (i.e. sum to 1.0)"""
         # TODO: implement this
-        pass
 
-        # find a coefficient to make the first 0 and last 1
+        total_weight = 0
+
+        for p in self.particle_cloud:
+            total_weight += p.w
+
+        for p in self.particle_cloud:
+            p.w = p.w / total_weight
+
+        # "find a coefficient to make the first 0 and last 1"
         # xnormalized = (x-xminimum)/range of x
-        # [w1 + ... + w300]/300 * each particle
+        # each particle / [w1 + ... + w300]
 
     def publish_particles(self, timestamp):
         msg = ParticleCloud()
