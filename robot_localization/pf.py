@@ -302,40 +302,96 @@ class ParticleFilter(Node):
         # do it for all the x,y positions list
         # Compute the error between the projected x,y and func output distance
         # Compute the new weights based on error
-
+#################################################################
+        # for p in self.particle_cloud:
+        #     ...
+        #     for i, (ri, ti) in enumerate(zip(r,theta)):
+        #         if(math.isfinite(ri)):
+        #             ang = ...
+        #             ri_adj = ...
+        #             closest = self.occupancy_field.get_closest_obstacle_distance(...+ri_adj*math.cos(ang), ...+ri_adj*math.sin(ang))
+        #             if(math.isfinite(closest)):
+        #                 ...
+        #     p.w = 1/(min(1000,total_deviation/(counter**2))**2)
+#####################################
+# REWERITING CODE#############3
         x_coord = []
         y_coord = []
 
-        for i, r_single in enumerate(r):
-            if not math.isinf(r_single) and r_single != 0:
-                x_coord.append(r_single * math.cos(math.radians(theta[i])))
-                y_coord.append(r_single * math.sin(math.radians(theta[i])))
-
-        for p in self.particle_cloud:
+        for i, r_val in enumerate(r):
+            if not math.isinf(r_val) and r_val != 0:
+                x_coord.append(r_val * math.cos(math.radians(theta[i])))
+                y_coord.append(r_val * math.sin(math.radians(theta[i])))
+        
+        for i,p in enumerate(self.particle_cloud):
+            print("NEW PARTICLE")
             p_error = []
             for x, y in zip(x_coord, y_coord):
                 # Transform Coordinates with rotation and translation
                 x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
                 y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
 
-                # only include scan point if numbers are good
-                if not math.isnan(x) and not math.isnan(y):
-                    error = self.occupancy_field.get_closest_obstacle_distance(x, y)
-                    # skip bad errors entirely (could assign high number instead)
-                    if not math.isnan(error):
-                        p_error.append(error)
-                # else, do not include in weight calculation
-                else:
-                    pass
+                # Get closest obstacle
+                error = self.occupancy_field.get_closest_obstacle_distance(x, y)
+                print(f"ERROR IS: {error}")
 
+                # Add to list
+                if math.isfinite(error):
+                    p_error.append(error)
+            
+            print(f"THE PARTICLE {i} ERROR LIST IS: {p_error}")
             # Take the average error
-            avg_error = sum(p_error) / len(p_error)
+            if p_error is not None:
+                avg_error = sum(p_error) / self.n_particles #len(p_error)
 
             # Use error to reassign weights to particle
-            p.w *= 1 / avg_error
+            if avg_error > 0:
+                p.w *= 1 / avg_error
 
-        # Normalize particles
+        # Normalize Particles
         self.normalize_particles()
+
+##################################
+# EXISTING CODE -- keep getting errors
+        # x_coord = []
+        # y_coord = []
+        # print("IS THIS WORKING????")
+
+        # for i, r_single in enumerate(r):
+        #     if not math.isinf(r_single) and r_single != 0:
+        #         x_coord.append(r_single * math.cos(math.radians(theta[i])))
+        #         y_coord.append(r_single * math.sin(math.radians(theta[i])))
+
+        # for p in self.particle_cloud:
+        #     print("NEW PARTICLE")
+        #     p_error = []
+        #     for x, y in zip(x_coord, y_coord):
+        #         # Transform Coordinates with rotation and translation
+        #         x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
+        #         y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
+
+        #         # only include scan point if numbers are values
+        #         if math.isfinite(x) and math.isfinite(y):
+        #             print(x, y)
+        #             error = self.occupancy_field.get_closest_obstacle_distance(x, y)
+        #             print(f"ERROR is: {error}")
+        #             # skip bad errors entirely (could assign high number instead)
+        #             if math.isfinite(error):
+        #                 p_error.append(error)
+        #         # else, do not include in weight calculation
+        #         else:
+        #             pass
+                
+            
+        #     print(f"THE PARTICLE ERROR LIST IS: {p_error}")
+        #     # Take the average error
+        #     avg_error = sum(p_error) / self.n_particles #len(p_error)
+
+        #     # Use error to reassign weights to particle
+        #     p.w *= 1 / avg_error
+
+        # # Normalize particles
+        # self.normalize_particles()
 
     def update_initial_pose(self, msg):
         """Callback function to handle re-initializing the particle filter based on a pose estimate.
