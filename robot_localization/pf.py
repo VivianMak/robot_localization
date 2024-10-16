@@ -314,9 +314,8 @@ class ParticleFilter(Node):
         for p in self.particle_cloud:
             for x, y in zip(x_coord, y_coord):
                 # Transform Coordinates with rotation and translation
-                x += (p.x * math.cos(p.theta)) - (y * math.sin(p.theta))
-                y += (p.x * math.sin(p.theta)) + (y * math.cos(p.theta))
-
+                x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
+                y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
 
                 p_error = []
 
