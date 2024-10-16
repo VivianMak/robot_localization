@@ -279,7 +279,7 @@ class ParticleFilter(Node):
 
         # draw new sample and refill particle cloud
         self.particle_cloud = draw_random_sample(
-            self.particle_cloud, weights, (1, self.n_particles)
+            self.particle_cloud, weights, self.n_particles
         )
 
         # reset weights to low non-zero (rewritten during scan update)
@@ -308,8 +308,8 @@ class ParticleFilter(Node):
 
         for i, r_single in enumerate(r):
             if not math.isinf(r_single) and r_single != 0:
-                x_coord.append(r_single * math.cos(theta[i]))
-                y_coord.append(r_single * math.sin(theta[i]))
+                x_coord.append(r_single * math.cos(math.radians(theta[i])))
+                y_coord.append(r_single * math.sin(math.radians(theta[i])))
 
         for p in self.particle_cloud:
             for x, y in zip(x_coord, y_coord):
@@ -323,7 +323,9 @@ class ParticleFilter(Node):
                 # only include scan point if numbers are good
                 if not math.isnan(x) and not math.isnan(y):
                     error = self.occupancy_field.get_closest_obstacle_distance(x, y)
-                    p_error.append(error)
+                    # skip bad errors entirely (could assign high number instead)
+                    if not math.isnan(error):
+                        p_error.append(error)
                 # else, do not include in weight calculation
                 else:
                     pass
