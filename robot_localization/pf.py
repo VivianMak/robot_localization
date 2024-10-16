@@ -17,7 +17,7 @@ import time
 import numpy as np
 from numpy import random
 from occupancy_field import OccupancyField
-from helper_functions import TFHelper
+from helper_functions import TFHelper, draw_random_sample
 from rclpy.qos import qos_profile_sensor_data
 from angle_helpers import quaternion_from_euler
 from typing import List
@@ -109,7 +109,7 @@ class ParticleFilter(Node):
         )
 
         # laser_subscriber listens for data from the lidar
-        self.create_subscription(LaserScan, self.scan_topic, self.scan_received, 10)
+        self.create_subscription(LaserScan, self.scan_topic, self.scan_received, 50)
 
         # this is used to keep track of the timestamps coming from bag files
         # knowing this information helps us set the timestamp of our map -> odom
@@ -278,8 +278,8 @@ class ParticleFilter(Node):
             weights.append(p.w)
 
         # draw new sample and refill particle cloud
-        self.particle_cloud = self.transform_helper.draw_random_sample(
-            self.particle_cloud, weights, self.n_particles
+        self.particle_cloud = draw_random_sample(
+            self.particle_cloud, weights, (1, self.n_particles)
         )
 
         # reset weights to low non-zero (rewritten during scan update)
@@ -303,19 +303,30 @@ class ParticleFilter(Node):
         # Compute the error between the projected x,y and func output distance
         # Compute the new weights based on error
 
-        x_coord = [r[i] * math.cos(theta[i]) for i in range(len(r))]
-        y_coord = [r[i] * math.sin(theta[i]) for i in range(len(r))]
+        x_coord = []
+        y_coord = []
+
+        for i, r_single in enumerate(r):
+            if not math.isinf(r_single) and r_single != 0:
+                x_coord.append(r_single * math.cos(theta[i]))
+                y_coord.append(r_single * math.sin(theta[i]))
 
         for p in self.particle_cloud:
-
             for x, y in zip(x_coord, y_coord):
                 # Transform Coordinates with rotation and translation
                 x += (p.x * math.cos(p.theta)) - (y * math.sin(p.theta))
                 y += (p.x * math.sin(p.theta)) + (y * math.cos(p.theta))
 
+
                 p_error = []
-                error = OccupancyField.get_closest_obstacle_distance(x, y)
-                p_error.append(error)
+
+                # only include scan point if numbers are good
+                if not math.isnan(x) and not math.isnan(y):
+                    error = self.occupancy_field.get_closest_obstacle_distance(x, y)
+                    p_error.append(error)
+                # else, do not include in weight calculation
+                else:
+                    pass
 
             # Take the average error
             avg_error = sum(p_error) / len(p_error)
@@ -345,7 +356,7 @@ class ParticleFilter(Node):
             )
         self.particle_cloud = []
 
-        particles_dict = {"x_distr": [], "y_disr": [], "theta_dist": []}
+        particles_dict = {"x_distr": [], "y_distr": [], "theta_distr": []}
 
         # Create and add n particles to the particle cloud list
         for i, key in enumerate(particles_dict.keys()):
