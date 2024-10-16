@@ -15,6 +15,7 @@ from rclpy.duration import Duration
 import math
 import time
 import numpy as np
+from numpy import random
 from occupancy_field import OccupancyField
 from helper_functions import TFHelper
 from rclpy.qos import qos_profile_sensor_data
@@ -22,6 +23,7 @@ from angle_helpers import quaternion_from_euler
 from typing import List
 
 from typing import List
+
 
 class Particle(object):
     """Represents a hypothesis (particle) of the robot's pose consisting of x,y and theta (yaw)
@@ -92,7 +94,8 @@ class ParticleFilter(Node):
         )  # the amount of angular movement before performing an update
 
         # TODO: define additional constants if needed
-        self.odom_noise = 0.1 # arbitrary value, could experimentally determine
+        self.odom_noise = 0.1  # arbitrary value, could experimentally determine
+        self.odom_heading_noise = 0.5
         self.robot_pose = Pose()
 
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
@@ -254,11 +257,11 @@ class ParticleFilter(Node):
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        # modify particles using delta
+        # modify particles using delta with random noise
         for p in self.particle_cloud:
             p.x += delta[0] + np.random.randn() * self.odom_noise
             p.y += delta[1] + np.random.randn() * self.odom_noise
-            p.theta += delta[2] + np.random.randn() * self.odom_noise # maybe different number for theta?
+            p.theta += delta[2] + np.random.randn() * self.odom_heading_noise
 
     def resample_particles(self):
         """Resample the particles according to the new particle weights.
@@ -275,7 +278,9 @@ class ParticleFilter(Node):
             weights.append(p.w)
 
         # draw new sample and refill particle cloud
-        self.particle_cloud = self.transform_helper.draw_random_sample(self.particle_cloud, weights, self.n_particles)
+        self.particle_cloud = self.transform_helper.draw_random_sample(
+            self.particle_cloud, weights, self.n_particles
+        )
 
         # reset weights to low non-zero (rewritten during scan update)
         for p in self.particle_cloud:
@@ -286,16 +291,6 @@ class ParticleFilter(Node):
         r (list): the distance readings to obstacles
         theta (list): the angle relative to the robot frame for each corresponding reading
         """
-        # TODO: implement this
-
-        # all for each particle, goal is to find error and update the weight
-        # set a tolerance in r[] to say a scan subseith theta t is a landmark/obstacle
-        # adjust the particle scan with theta to match the bag scan
-        # use get_closest_obstacle_distace() in occupancy.py to map particle scan obstacle points with bag file obstacle scan
-        # compute the error
-        # use math to redefine weight on error
-        # no return, self.weight updates for each particle!
-
         # Updated psuedocode
         # Given the current Neato scan of ranges and corresponding theta
         # Convert the r,theta to x,y coordinates
@@ -312,21 +307,24 @@ class ParticleFilter(Node):
         y_coord = [r[i] * math.sin(theta[i]) for i in range(len(r))]
 
         for p in self.particle_cloud:
-            for x, y in zip(x_coord, y_coord):
 
-                # Transform Coordinates
-                x += p.x
-                y += p.y
-                # theta +=
+            for x, y in zip(x_coord, y_coord):
+                # Transform Coordinates with rotation and translation
+                x += (p.x * math.cos(p.theta)) - (y * math.sin(p.theta))
+                y += (p.x * math.sin(p.theta)) + (y * math.cos(p.theta))
 
                 p_error = []
                 error = OccupancyField.get_closest_obstacle_distance(x, y)
                 p_error.append(error)
 
-            value = sum(p_error) / len(p_error)
+            # Take the average error
+            avg_error = sum(p_error) / len(p_error)
 
             # Use error to reassign weights to particle
-            p.w *= 1 / value
+            p.w *= 1 / avg_error
+
+        # Normalize particles
+        self.normalize_particles()
 
     def update_initial_pose(self, msg):
         """Callback function to handle re-initializing the particle filter based on a pose estimate.
@@ -346,26 +344,42 @@ class ParticleFilter(Node):
                 self.odom_pose
             )
         self.particle_cloud = []
-        # TODO create particles
+
+        particles_dict = {"x_distr": [], "y_disr": [], "theta_dist": []}
+
+        # Create and add n particles to the particle cloud list
+        for i, key in enumerate(particles_dict.keys()):
+            # Subscribe to 2D Pose Estimate to get x,y,theta
+            # Use numpy random.normal to get a normal distribution
+
+            particles_dict[key] = random.normal(
+                loc=xy_theta[i], scale=1, size=self.n_particles
+            )
+
+        for i in range(self.n_particles):
+            p = Particle(
+                particles_dict["x_distr"][i],
+                particles_dict["y_distr"][i],
+                particles_dict["theta_distr"][i],
+                0.1,
+            )
+            self.particle_cloud.append(p)
 
         self.normalize_particles()
         self.update_robot_pose()
 
     def normalize_particles(self):
         """Make sure the particle weights define a valid distribution (i.e. sum to 1.0)"""
-        # TODO: implement this
 
         total_weight = 0
 
+        # Find the sum of the weights
         for p in self.particle_cloud:
             total_weight += p.w
 
+        # Normalize
         for p in self.particle_cloud:
             p.w = p.w / total_weight
-
-        # "find a coefficient to make the first 0 and last 1"
-        # xnormalized = (x-xminimum)/range of x
-        # each particle / [w1 + ... + w300]
 
     def publish_particles(self, timestamp):
         msg = ParticleCloud()
