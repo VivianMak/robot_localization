@@ -312,12 +312,11 @@ class ParticleFilter(Node):
                 y_coord.append(r_single * math.sin(math.radians(theta[i])))
 
         for p in self.particle_cloud:
+            p_error = []
             for x, y in zip(x_coord, y_coord):
                 # Transform Coordinates with rotation and translation
                 x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
                 y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
-
-                p_error = []
 
                 # only include scan point if numbers are good
                 if not math.isnan(x) and not math.isnan(y):
