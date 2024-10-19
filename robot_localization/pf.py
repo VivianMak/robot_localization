@@ -13,6 +13,8 @@ from nav2_msgs.msg import Particle as Nav2Particle
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
 from rclpy.duration import Duration
 import math
+import statistics
+import heapq
 import time
 import numpy as np
 from numpy import random
@@ -94,7 +96,7 @@ class ParticleFilter(Node):
         )  # the amount of angular movement before performing an update
 
         # TODO: define additional constants if needed
-        self.odom_noise = 0.1  # arbitrary value, could experimentally determine
+        self.odom_noise = 0.2  # arbitrary value, could experimentally determine
         self.odom_heading_noise = 0.5
         self.robot_pose = Pose()
 
@@ -216,12 +218,30 @@ class ParticleFilter(Node):
         self.normalize_particles()
 
         # choose favorite particle
-        max_weight = 0.0
+        weight_list = [[], []] # original index, weight
+
+        # for calculating median particle
+        x_list = []
+        y_list = []
+        t_list = []
         particle_choice = Particle()
-        for p in self.particle_cloud:
-            if p.w > max_weight:
-                max_weight = p.w
-                particle_choice = p
+
+        sorted_particles_by_weight = sorted(
+            self.particle_cloud,
+            key=lambda particle: particle.w,
+            reverse=False)
+
+        # top three best particles
+        particle_choices = sorted_particles_by_weight[-3:]
+        for p in particle_choices:
+            x_list.append(p.x)
+            y_list.append(p.y)
+            t_list.append(p.theta)
+
+        # find median best particle
+        particle_choice.x = statistics.median(x_list)
+        particle_choice.y = statistics.median(y_list)
+        particle_choice.theta = statistics.median(t_list)
 
         # assert this particle as estimate
         self.robot_pose = particle_choice.as_pose()
@@ -324,7 +344,6 @@ class ParticleFilter(Node):
                 y_coord.append(r_val * math.sin(math.radians(theta[i])))
         
         for i,p in enumerate(self.particle_cloud):
-            print("NEW PARTICLE")
             p_error = []
             for x, y in zip(x_coord, y_coord):
                 # Transform Coordinates with rotation and translation
@@ -333,20 +352,22 @@ class ParticleFilter(Node):
 
                 # Get closest obstacle
                 error = self.occupancy_field.get_closest_obstacle_distance(x, y)
-                print(f"ERROR IS: {error}")
 
                 # Add to list
                 if math.isfinite(error):
                     p_error.append(error)
             
-            print(f"THE PARTICLE {i} ERROR LIST IS: {p_error}")
-            # Take the average error
-            if p_error is not None:
-                avg_error = sum(p_error) / self.n_particles #len(p_error)
+            # # Take the average error
+            # if p_error is not None:
+            #     avg_error = sum(p_error) / self.n_particles #len(p_error)
+            # else:
+            #     avg_error = 0
 
             # Use error to reassign weights to particle
-            if avg_error > 0:
-                p.w *= 1 / avg_error
+            if p_error is not None and len(p_error) != 0:
+                p.w = 1/min(1000,(sum(p_error)/(len(p_error))**2))**2
+            else:
+                p.w = 0.001
 
         # Normalize Particles
         self.normalize_particles()
