@@ -214,13 +214,12 @@ class ParticleFilter(Node):
             (1): compute the mean pose
             (2): compute the most likely pose (i.e. the mode of the distribution)
         """
-        # first make sure that the particle weights are normalized
+
+        print("---------- UPDATING ROBOT POSE ----------")
+
+        # Normalize particles
         self.normalize_particles()
 
-        # choose favorite particle
-        weight_list = [[], []] # original index, weight
-
-        # for calculating median particle
         x_list = []
         y_list = []
         t_list = []
@@ -231,20 +230,22 @@ class ParticleFilter(Node):
             key=lambda particle: particle.w,
             reverse=False)
 
-        # top three best particles
+        # Keep top three particles
         particle_choices = sorted_particles_by_weight[-3:]
+
         for p in particle_choices:
             x_list.append(p.x)
             y_list.append(p.y)
             t_list.append(p.theta)
 
-        # find median best particle
+        # Take median of top 3 particles
         particle_choice.x = statistics.median(x_list)
         particle_choice.y = statistics.median(y_list)
         particle_choice.theta = statistics.median(t_list)
 
-        # assert this particle as estimate
+        # Assert this particle as estimate
         self.robot_pose = particle_choice.as_pose()
+
         if hasattr(self, "odom_pose"):
             self.transform_helper.fix_map_to_odom_transform(
                 self.robot_pose, self.odom_pose
@@ -255,114 +256,105 @@ class ParticleFilter(Node):
             )
 
     def update_particles_with_odom(self):
-        """Update the particles using the newly given odometry pose.
+        """
+        Update the particles using the newly given odometry pose.
         The function computes the value delta which is a tuple (x,y,theta)
         that indicates the change in position and angle between the odometry
         when the particles were last updated and the current odometry.
         """
+
+        print("---------- UPDATING PARTICLES WITH LASER ----------")
+
+        # Get a new robot pose and convert to (x,y,theta) pose
         new_odom_xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(
             self.odom_pose
         )
-        # compute the change in x,y,theta since our last update
+
+        # Find change in (x,y,theta) since old pose
         if self.current_odom_xy_theta:
+
             old_odom_xy_theta = self.current_odom_xy_theta
+
             delta = (
                 new_odom_xy_theta[0] - self.current_odom_xy_theta[0],
                 new_odom_xy_theta[1] - self.current_odom_xy_theta[1],
                 new_odom_xy_theta[2] - self.current_odom_xy_theta[2],
             )
 
+            # Set current pose to newly retrieved pose
             self.current_odom_xy_theta = new_odom_xy_theta
         else:
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        # modify particles using delta with random noise
+        # Update particle cloud with the calculated delta odom plus noise
         for p in self.particle_cloud:
             p.x += delta[0] + np.random.randn() * self.odom_noise
             p.y += delta[1] + np.random.randn() * self.odom_noise
             p.theta += delta[2] + np.random.randn() * self.odom_heading_noise
 
     def resample_particles(self):
-        """Resample the particles according to the new particle weights.
+        """
+        Resample the particles according to the new particle weights.
         The weights stored with each particle should define the probability that a particular
         particle is selected in the resampling step.  You may want to make use of the given helper
         function draw_random_sample in helper_functions.py.
         """
-        # make sure the distribution is normalized
+
+        print("---------- RESAMPLING PARTICLES ----------")
+        
+        # Normalize the particle weights
         self.normalize_particles()
 
-        # build ordered list of particle weights
+        # Extract weights from particle cloud
         weights = []
         for p in self.particle_cloud:
             weights.append(p.w)
 
-        # draw new sample and refill particle cloud
+        # Draw new sample of the particle cloud
         self.particle_cloud = draw_random_sample(
             self.particle_cloud, weights, self.n_particles
         )
 
-        # reset weights to low non-zero (rewritten during scan update)
+        # Reset weights to low non-zero (rewritten during scan update)
         for p in self.particle_cloud:
             p.w = 0.1
 
     def update_particles_with_laser(self, r, theta):
-        """Updates the particle weights in response to the scan data
+        """
+        Updates the particle weights in response to the scan data
         r (list): the distance readings to obstacles
         theta (list): the angle relative to the robot frame for each corresponding reading
         """
-        # Updated psuedocode
-        # Given the current Neato scan of ranges and corresponding theta
-        # Convert the r,theta to x,y coordinates
-        # Project that onto the particles' frame??????????
-        # Each particle is acting as the current Neato position
-        # each with the current Neato scan
-        # Use get_closest_obstacle_distance for each x,y in the Neato scan projection
-        # if returned distance is 0, then the weight is 1 (meaning same position)
-        # do it for all the x,y positions list
-        # Compute the error between the projected x,y and func output distance
-        # Compute the new weights based on error
-#################################################################
-        # for p in self.particle_cloud:
-        #     ...
-        #     for i, (ri, ti) in enumerate(zip(r,theta)):
-        #         if(math.isfinite(ri)):
-        #             ang = ...
-        #             ri_adj = ...
-        #             closest = self.occupancy_field.get_closest_obstacle_distance(...+ri_adj*math.cos(ang), ...+ri_adj*math.sin(ang))
-        #             if(math.isfinite(closest)):
-        #                 ...
-        #     p.w = 1/(min(1000,total_deviation/(counter**2))**2)
-#####################################
-# REWERITING CODE#############3
+
+        print("---------- UPDATING PARTICLES WITH LASER ----------")
+        
         x_coord = []
         y_coord = []
 
+        # Convert laser scan polar coordinates (r, theta) to cartesian (x,y)
         for i, r_val in enumerate(r):
             if not math.isinf(r_val) and r_val != 0:
                 x_coord.append(r_val * math.cos(math.radians(theta[i])))
                 y_coord.append(r_val * math.sin(math.radians(theta[i])))
         
+        # Find the error for each particle
         for i,p in enumerate(self.particle_cloud):
+
             p_error = []
+
             for x, y in zip(x_coord, y_coord):
-                # Transform Coordinates with rotation and translation
+                # Transform laser coordinates with rotation and translation
                 x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
                 y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
 
-                # Get closest obstacle
+                # Get closest obstacle for each laser scan point
                 error = self.occupancy_field.get_closest_obstacle_distance(x, y)
 
-                # Add to list
+                # Filter out infite distances
                 if math.isfinite(error):
                     p_error.append(error)
             
-            # # Take the average error
-            # if p_error is not None:
-            #     avg_error = sum(p_error) / self.n_particles #len(p_error)
-            # else:
-            #     avg_error = 0
-
             # Use error to reassign weights to particle
             if p_error is not None and len(p_error) != 0:
                 p.w = 1/min(1000,(sum(p_error)/(len(p_error))**2))**2
@@ -372,78 +364,44 @@ class ParticleFilter(Node):
         # Normalize Particles
         self.normalize_particles()
 
-##################################
-# EXISTING CODE -- keep getting errors
-        # x_coord = []
-        # y_coord = []
-        # print("IS THIS WORKING????")
-
-        # for i, r_single in enumerate(r):
-        #     if not math.isinf(r_single) and r_single != 0:
-        #         x_coord.append(r_single * math.cos(math.radians(theta[i])))
-        #         y_coord.append(r_single * math.sin(math.radians(theta[i])))
-
-        # for p in self.particle_cloud:
-        #     print("NEW PARTICLE")
-        #     p_error = []
-        #     for x, y in zip(x_coord, y_coord):
-        #         # Transform Coordinates with rotation and translation
-        #         x = (x * math.cos(p.theta)) - (y * math.sin(p.theta)) + p.x
-        #         y = (x * math.sin(p.theta)) + (y * math.cos(p.theta)) + p.y
-
-        #         # only include scan point if numbers are values
-        #         if math.isfinite(x) and math.isfinite(y):
-        #             print(x, y)
-        #             error = self.occupancy_field.get_closest_obstacle_distance(x, y)
-        #             print(f"ERROR is: {error}")
-        #             # skip bad errors entirely (could assign high number instead)
-        #             if math.isfinite(error):
-        #                 p_error.append(error)
-        #         # else, do not include in weight calculation
-        #         else:
-        #             pass
-                
-            
-        #     print(f"THE PARTICLE ERROR LIST IS: {p_error}")
-        #     # Take the average error
-        #     avg_error = sum(p_error) / self.n_particles #len(p_error)
-
-        #     # Use error to reassign weights to particle
-        #     p.w *= 1 / avg_error
-
-        # # Normalize particles
-        # self.normalize_particles()
-
     def update_initial_pose(self, msg):
-        """Callback function to handle re-initializing the particle filter based on a pose estimate.
+        """
+        Callback function to handle re-initializing the particle filter based on a pose estimate.
         These pose estimates could be generated by another ROS Node or could come from the rviz GUI
         """
+
+        print("---------- INTIAL POSE UPDATED ----------")
+
         xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(msg.pose.pose)
         self.initialize_particle_cloud(msg.header.stamp, xy_theta)
 
     def initialize_particle_cloud(self, timestamp, xy_theta=None):
-        """Initialize the particle cloud.
+        """
+        Initialize the particle cloud.
         Arguments
         xy_theta: a triple consisting of the mean x, y, and theta (yaw) to initialize the
                   particle cloud around.  If this input is omitted, the odometry will be used
         """
+
+        print("---------- INITIALIZED PARTICLE CLOUD ----------")
+
+        # Set initial (x,y,theta) as the robot odom pose
         if xy_theta is None:
             xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(
                 self.odom_pose
             )
+
         self.particle_cloud = []
 
         particles_dict = {"x_distr": [], "y_distr": [], "theta_distr": []}
 
-        # Create and add n particles to the particle cloud list
+        # Create a normal distribution around the initial (x,y,theta)
         for i, key in enumerate(particles_dict.keys()):
-            # Subscribe to 2D Pose Estimate to get x,y,theta
-            # Use numpy random.normal to get a normal distribution
-
             particles_dict[key] = random.normal(
                 loc=xy_theta[i], scale=1, size=self.n_particles
             )
 
+        # Assign each particle in the particle cloud a value from the normal distribution
         for i in range(self.n_particles):
             p = Particle(
                 particles_dict["x_distr"][i],
@@ -459,13 +417,15 @@ class ParticleFilter(Node):
     def normalize_particles(self):
         """Make sure the particle weights define a valid distribution (i.e. sum to 1.0)"""
 
+        print("---------- NORMALIZING PARTICLE CLOUD ----------")
+
         total_weight = 0
 
-        # Find the sum of the weights
+        # Sum all particle weights
         for p in self.particle_cloud:
             total_weight += p.w
 
-        # Normalize
+        # Divide each weight by sum
         for p in self.particle_cloud:
             p.w = p.w / total_weight
 
