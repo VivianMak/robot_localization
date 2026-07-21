@@ -36,10 +36,6 @@ $ ros2 bag play ros2_ws/src/robot_localization/bags/macfirst_floor_take_1 --cloc
 
 When the filter starts (or receives a new initial pose estimate from RViz), it seeds a cloud of `n_particles` (500) hypotheses. Each particle's `(x, y, theta)` is drawn from a normal distribution centered on the robot's starting pose, and every particle begins with equal weight. This cloud represents the initial belief over where the robot could be in the map.
 
-$$
-x^{(i)} \sim \mathcal{N}(x_0, 1), \quad y^{(i)} \sim \mathcal{N}(y_0, 1), \quad \theta^{(i)} \sim \mathcal{N}(\theta_0, 1), \qquad i = 1, \dots, N
-$$
-
 ### 2. Predict: Motion Update
 ---
 `update_particles_with_odom()`
@@ -97,22 +93,8 @@ $$
 
 After normalizing weights, the filter takes the top 3 highest-weighted particles and computes the median of their `x`, `y`, and `theta` values as the robot's estimated pose. This estimate is used to correct the `map` → `odom` transform.
 
-$$
-\{p^{(1)}, p^{(2)}, p^{(3)}\} = \underset{p \in \text{particle cloud}}{\text{top 3 by } w}
-$$
-
-$$
-\hat x = \mathrm{median}\big(x^{(1)}, x^{(2)}, x^{(3)}\big), \quad
-\hat y = \mathrm{median}\big(y^{(1)}, y^{(2)}, y^{(3)}\big), \quad
-\hat\theta = \mathrm{median}\big(\theta^{(1)}, \theta^{(2)}, \theta^{(3)}\big)
-$$
-
 ### 5. Resample: Iterate
 ---
 `resample_particles()`
 
 The normalized particle weights are used as a probability distribution to draw a new set of `n_particles` particles (`draw_random_sample`), keeping likely hypotheses and discarding unlikely ones. Weights are reset to a small placeholder value, and the loop returns to step 2 as the robot continues moving, progressively converging the cloud around the true pose.
-
-$$
-p^{(i)}_{t} \sim \mathrm{Categorical}\big(w^{(1)}, \dots, w^{(N)}\big), \qquad i = 1, \dots, N
-$$
