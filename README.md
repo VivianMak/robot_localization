@@ -42,16 +42,22 @@ When the filter starts (or receives a new initial pose estimate from RViz), it s
 
 Once the robot has moved more than `d_thresh` (0.2 m) or `a_thresh` (π/6 rad) since the last update (`moved_far_enough_to_update()`), the filter computes the odometry delta `(Δx, Δy, Δtheta)` since the last update and applies it to every particle, adding Gaussian noise (`odom_noise`, `odom_heading_noise`) to model motion uncertainty.
 
-$$
-\Delta x = x_t^{odom} - x_{t-1}^{odom}, \qquad \Delta y = y_t^{odom} - y_{t-1}^{odom}, \qquad \Delta\theta = \theta_t^{odom} - \theta_{t-1}^{odom}
-$$
+Odometry delta since the last filter update:
 
 $$
-x^{(i)} \leftarrow x^{(i)} + \Delta x + \epsilon_x, \qquad y^{(i)} \leftarrow y^{(i)} + \Delta y + \epsilon_y, \qquad \theta^{(i)} \leftarrow \theta^{(i)} + \Delta\theta + \epsilon_\theta
+\Delta x = x_t^{\text{odom}} - x_{t-1}^{\text{odom}}, \qquad
+\Delta y = y_t^{\text{odom}} - y_{t-1}^{\text{odom}}, \qquad
+\Delta\theta = \theta_t^{\text{odom}} - \theta_{t-1}^{\text{odom}}
 $$
 
+Applied to every particle $i$, with Gaussian noise:
+
 $$
-\epsilon_x, \epsilon_y \sim \mathcal{N}(0, 0.2^2), \qquad \epsilon_\theta \sim \mathcal{N}(0, 0.5^2)
+\begin{aligned}
+x^{(i)} &\leftarrow x^{(i)} + \Delta x + \epsilon_x, &\quad \epsilon_x &\sim \mathcal{N}(0,\ 0.2^2) \\
+y^{(i)} &\leftarrow y^{(i)} + \Delta y + \epsilon_y, &\quad \epsilon_y &\sim \mathcal{N}(0,\ 0.2^2) \\
+\theta^{(i)} &\leftarrow \theta^{(i)} + \Delta\theta + \epsilon_\theta, &\quad \epsilon_\theta &\sim \mathcal{N}(0,\ 0.5^2)
+\end{aligned}
 $$
 
 ### 3. Correct: Obsevation Update
@@ -60,29 +66,35 @@ $$
 
 The current LiDAR scan `(r, theta)` is converted from polar to Cartesian coordinates, then transformed into the map frame using each particle's hypothesized pose. Each particle's predicted scan is compared against the map via `OccupancyField.get_closest_obstacle_distance()`; particles whose scan lines up well with real obstacles (low error) are assigned higher weight, and all weights are then normalized to sum to 1 (`normalize_particles()`).
 
-**Polar → Cartesian, robot frame:**
+Each scan point $k$ is converted from polar to Cartesian in the robot frame:
+
 $$
 x_k = r_k \cos\theta_k, \qquad y_k = r_k \sin\theta_k
 $$
 
-**Robot frame → map frame, per particle $i$:**
+Then rotated and translated into the map frame using particle $i$'s pose:
+
 $$
-\begin{bmatrix} x_k^{map} \\ y_k^{map} \end{bmatrix} =
+\begin{bmatrix} x_k^{\text{map}} \\ y_k^{\text{map}} \end{bmatrix} =
 \begin{bmatrix} \cos\theta^{(i)} & -\sin\theta^{(i)} \\ \sin\theta^{(i)} & \cos\theta^{(i)} \end{bmatrix}
 \begin{bmatrix} x_k \\ y_k \end{bmatrix} +
 \begin{bmatrix} x^{(i)} \\ y^{(i)} \end{bmatrix}
 $$
 
-**Error and weight for particle $i$, over $M$ valid scan points:**
+Each transformed point is scored by its distance $d(\cdot)$ to the nearest mapped obstacle, and the particle's weight is the inverse square of that error over its $M$ valid scan points:
+
 $$
-e_k = d\big(x_k^{map}, y_k^{map}\big) \quad \text{(distance to nearest obstacle)}
+e_k = d\left(x_k^{\text{map}},\ y_k^{\text{map}}\right)
 $$
 
 $$
-\bar e^{(i)} = \frac{\sum_{k=1}^{M} e_k}{M^2}, \qquad w^{(i)} = \frac{1}{\min\!\left(1000,\ \bar e^{(i)}\right)^2}
+\bar{e}^{(i)} = \frac{1}{M^2}\sum_{k=1}^{M} e_k,
+\qquad
+w^{(i)} = \frac{1}{\min\left(1000,\ \bar{e}^{(i)}\right)^2}
 $$
 
-**Normalization:**
+Finally the weights are normalized into a valid distribution:
+
 $$
 w^{(i)} \leftarrow \frac{w^{(i)}}{\sum_{j=1}^{N} w^{(j)}}
 $$
